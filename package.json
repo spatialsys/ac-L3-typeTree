@@ -1,0 +1,15 @@
+{
+  "name": "less3.typetree",
+  "displayName": "L3 Type Tree",
+  "version": "0.1.0",
+  "unity": "6000",
+  "description": "A utility to pick a type from a popup window.",
+  "author": "Less 3",
+  "keywords": [
+    "Type",
+    "Popup",
+    "Picker",
+    "Tree"
+  ],
+  "category": "Unity"
+}
