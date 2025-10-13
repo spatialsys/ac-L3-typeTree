@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -29,13 +30,14 @@ namespace Less3.TypeTree.Editor
 
         private bool selectedSomething = false;
 
-        public static void OpenForType(Type KeyType, Action<Type> typeSelectedCallback, Action nothingSelectedCallback = null)
+        public static void OpenForType(Type KeyType, Vector2 position, Action<Type> typeSelectedCallback, Action nothingSelectedCallback = null)
         {
             L3TypeTreeWindow window = ScriptableObject.CreateInstance<L3TypeTreeWindow>();
             //get mouse position in screen space
 
-            Vector2 mousePos = GUIUtility.GUIToScreenPoint(Input.mousePosition);
-            window.position = new Rect(mousePos.x + 128, mousePos.y, 256, 256);
+            Vector2 newPos = GUIUtility.GUIToScreenPoint(position);
+
+            window.position = new Rect(newPos.x, newPos.y + 24, 256, 256);
             window.ShowPopup();
             window.Focus();
             window.Setup(KeyType, typeSelectedCallback, nothingSelectedCallback);
