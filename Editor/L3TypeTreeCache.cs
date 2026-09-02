@@ -11,6 +11,7 @@ namespace Less3.TypeTree.Editor
     public static class L3TypeTreeCache
     {
         public static Dictionary<Type, List<TreeViewItemData<L3TypeTreeEntry>>> typeMenuCache = new Dictionary<Type, List<TreeViewItemData<L3TypeTreeEntry>>>();
+        private static readonly HashSet<Type> _warnedMissing = new HashSet<Type>();
 
         public static List<TreeViewItemData<L3TypeTreeEntry>> GetMenuForType(Type graphType)
         {
@@ -19,16 +20,21 @@ namespace Less3.TypeTree.Editor
                 return typeMenuCache[graphType];
             }
 
-            // try all directly inherited types in order
-            foreach (var iface in graphType.GetInterfaces())
-            {
-                if (iface.IsClass && typeMenuCache.ContainsKey(iface))
-                {
-                    return typeMenuCache[iface];
-                }
-            }
-
+            // Exact key only, no inheritance fallback: a key that has drifted from the field being
+            // picked for should fail loudly, not resolve to some neighbouring menu.
+            WarnMissing(graphType);
             return new List<TreeViewItemData<L3TypeTreeEntry>>();
+        }
+
+        // Warned once per key: the window asks again every time a search is cleared. Never null --
+        // the dictionary lookup above throws on a null key before it can get here.
+        private static void WarnMissing(Type keyType)
+        {
+            if (!_warnedMissing.Add(keyType))
+                return;
+
+            Debug.LogWarning($"[L3TypeTree] Nothing is keyed to '{keyType.FullName}', so its picker is empty. " +
+                             "Check that the [TypeTreeMenu] key type matches the declared type of the field being picked for.");
         }
 
         public static List<TreeViewItemData<L3TypeTreeEntry>> GetFilteredMenuForType(Type graphType, string filterText)
@@ -45,45 +51,55 @@ namespace Less3.TypeTree.Editor
                     return GetFilteredTree(typeMenuCache[graphType], filterText);
                 }
             }
+
+            WarnMissing(graphType);
             return new List<TreeViewItemData<L3TypeTreeEntry>>();
         }
 
         static L3TypeTreeCache()
         {
-            // get all TypeTreeMenuAttribute types
-            List<(Type graphType, Type nodeType, TypeTreeMenuAttribute[] attrs)> types = new List<(Type, Type, TypeTreeMenuAttribute[])>();
+            // One bucket per key type. Nested loops because both multiply: an attribute names
+            // several keys, and a type carries several attributes -- every pairing is registered.
+            Dictionary<Type, List<(Type nodeType, TypeTreeMenuAttribute att)>> keyTypes = new Dictionary<Type, List<(Type, TypeTreeMenuAttribute)>>();
+
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 foreach (var type in assembly.GetTypes())
                 {
+                    // inherit: false -- otherwise a derived class picks up its base's entry and
+                    // every concrete type shows up twice.
                     var attrs = (TypeTreeMenuAttribute[])type.GetCustomAttributes(typeof(TypeTreeMenuAttribute), false);
-                    if (attrs.Length > 0)
+                    foreach (var attr in attrs)
                     {
-                        types.Add((attrs[0].keyType, type, attrs));
+                        if (attr.keyTypes == null || attr.keyTypes.Length == 0)
+                        {
+                            Debug.LogError($"[L3TypeTree] '{type.FullName}' has a [TypeTreeMenu] naming no key type, so it will not appear in any picker.");
+                            continue;
+                        }
+
+                        foreach (var key in attr.keyTypes)
+                        {
+                            if (key == null)
+                            {
+                                Debug.LogError($"[L3TypeTree] '{type.FullName}' has a [TypeTreeMenu] with a null key type in its list.");
+                                continue;
+                            }
+
+                            if (!keyTypes.TryGetValue(key, out var entries))
+                            {
+                                entries = new List<(Type, TypeTreeMenuAttribute)>();
+                                keyTypes[key] = entries;
+                            }
+
+                            entries.Add((type, attr));
+                        }
                     }
                 }
             }
 
-            // sort by graph types
-            Dictionary<Type, List<(Type nodeType, TypeTreeMenuAttribute att)>> keyTypes = new Dictionary<Type, List<(Type, TypeTreeMenuAttribute)>>();
-            foreach (var (graphType, nodeType, attrs) in types)
+            foreach (var pair in keyTypes)
             {
-                if (!keyTypes.ContainsKey(graphType))
-                    keyTypes[graphType] = new List<(Type, TypeTreeMenuAttribute)>();
-
-                foreach (var attr in attrs)
-                {
-                    if (attr.keyType == graphType)
-                    {
-                        keyTypes[graphType].Add((nodeType, attr));
-                    }
-                }
-            }
-
-            // build tree for each graph type
-            foreach (var keyType in keyTypes.Keys)
-            {
-                BuildMenuForType(keyType, keyTypes[keyType]);
+                BuildMenuForType(pair.Key, pair.Value);
             }
         }
 
@@ -123,7 +139,10 @@ namespace Less3.TypeTree.Editor
                 }
             }
 
-            // recursively create tree view items
+            // A counter, because TreeView needs ids unique within the menu: hashing the last path
+            // segment collided two leaves both called "Stop" under different folders.
+            int nextId = 0;
+
             List<TreeViewItemData<L3TypeTreeEntry>> BuildTree(Dictionary<string, object> subtree)
             {
                 List<TreeViewItemData<L3TypeTreeEntry>> items = new List<TreeViewItemData<L3TypeTreeEntry>>();
@@ -134,38 +153,24 @@ namespace Less3.TypeTree.Editor
                     {
                         // leaf
                         var entry = new L3TypeTreeEntry { path = key, type = nodeType };
-                        items.Add(new TreeViewItemData<L3TypeTreeEntry>(entry.path.GetHashCode(), entry));
+                        items.Add(new TreeViewItemData<L3TypeTreeEntry>(nextId++, entry));
                     }
                     else if (subtree[key] is Dictionary<string, object> childSubtree)
                     {
                         // folder
-                        var children = BuildTree(childSubtree);
                         var entry = new L3TypeTreeEntry { path = key, type = null };
-                        items.Add(new TreeViewItemData<L3TypeTreeEntry>(entry.path.GetHashCode(), entry, children));
+                        items.Add(new TreeViewItemData<L3TypeTreeEntry>(nextId++, entry, BuildTree(childSubtree)));
+                    }
+                    else
+                    {
+                        Debug.LogError($"[L3TypeTree] Unexpected structure under '{key}' in the '{keyType.Name}' menu.");
                     }
                 }
 
                 return items;
             }
 
-            List<TreeViewItemData<L3TypeTreeEntry>> items = new List<TreeViewItemData<L3TypeTreeEntry>>();
-            foreach (var key in tree.Keys)
-            {
-                if (tree[key] is Dictionary<string, object> branch)
-                {
-                    items.Add(new TreeViewItemData<L3TypeTreeEntry>(key.GetHashCode(), new L3TypeTreeEntry { path = key, type = null }, BuildTree(branch)));
-                }
-                else if (tree[key] is Type nodeType)
-                {
-                    var entry = new L3TypeTreeEntry { path = key, type = nodeType };
-                    items.Add(new TreeViewItemData<L3TypeTreeEntry>(entry.path.GetHashCode(), entry));
-                }
-                else
-                {
-                    Debug.LogError("Unexpected structure in node create menu tree.");
-                }
-            }
-            typeMenuCache[keyType] = items;
+            typeMenuCache[keyType] = BuildTree(tree);
         }
 
         // Recursive function to filter TreeView items
