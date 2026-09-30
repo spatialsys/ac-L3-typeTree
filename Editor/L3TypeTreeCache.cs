@@ -26,8 +26,8 @@ namespace Less3.TypeTree.Editor
             return new List<TreeViewItemData<L3TypeTreeEntry>>();
         }
 
-        // Warned once per key: the window asks again every time a search is cleared. Never null --
-        // the dictionary lookup above throws on a null key before it can get here.
+        // Warned once per key: the window asks again every time it opens. Never null -- the
+        // dictionary lookup above throws on a null key before it can get here.
         private static void WarnMissing(Type keyType)
         {
             if (!_warnedMissing.Add(keyType))
@@ -35,25 +35,6 @@ namespace Less3.TypeTree.Editor
 
             Debug.LogWarning($"[L3TypeTree] Nothing is keyed to '{keyType.FullName}', so its picker is empty. " +
                              "Check that the [TypeTreeMenu] key type matches the declared type of the field being picked for.");
-        }
-
-        public static List<TreeViewItemData<L3TypeTreeEntry>> GetFilteredMenuForType(Type graphType, string filterText)
-        {
-            if (typeMenuCache.ContainsKey(graphType))
-            {
-                if (string.IsNullOrEmpty(filterText))
-                {
-                    return typeMenuCache[graphType];
-                }
-                else
-                {
-                    filterText = filterText.ToLower();
-                    return GetFilteredTree(typeMenuCache[graphType], filterText);
-                }
-            }
-
-            WarnMissing(graphType);
-            return new List<TreeViewItemData<L3TypeTreeEntry>>();
         }
 
         static L3TypeTreeCache()
@@ -173,33 +154,22 @@ namespace Less3.TypeTree.Editor
             typeMenuCache[keyType] = BuildTree(tree);
         }
 
-        // Recursive function to filter TreeView items
-        private static List<TreeViewItemData<L3TypeTreeEntry>> GetFilteredTree(IEnumerable<TreeViewItemData<L3TypeTreeEntry>> items, string filterText)
+        // A matching entry keeps its whole subtree. Folders have no type, so a type filter keeps a
+        // folder only while one of its leaves survives.
+        public static List<TreeViewItemData<L3TypeTreeEntry>> Filter(IEnumerable<TreeViewItemData<L3TypeTreeEntry>> items, Func<L3TypeTreeEntry, bool> match)
         {
-            List<TreeViewItemData<L3TypeTreeEntry>> result = new List<TreeViewItemData<L3TypeTreeEntry>>();
+            var result = new List<TreeViewItemData<L3TypeTreeEntry>>();
             foreach (var item in items)
             {
-                bool matches = item.data.path.ToLower().Contains(filterText);
-                IEnumerable<TreeViewItemData<L3TypeTreeEntry>> filteredChildren = null;
-
-                if (item.children != null && item.children.Count() > 0)
+                if (match(item.data))
                 {
-                    filteredChildren = GetFilteredTree(item.children, filterText);
+                    result.Add(item);
                 }
-
-                // Include the item if it matches or if any of its children match
-                if (matches || (filteredChildren != null && filteredChildren.Count() > 0))
+                else if (item.hasChildren)
                 {
-                    // If the item itself doesn't match but its children do, create a new item with only the matching children
-                    if (!matches && filteredChildren != null)
-                    {
-                        var newItem = new TreeViewItemData<L3TypeTreeEntry>(item.id, item.data, filteredChildren.ToList());
-                        result.Add(newItem);
-                    }
-                    else // If the item matches, or if it matches and has children (even if they don't match), add it as is
-                    {
-                        result.Add(item);
-                    }
+                    var children = Filter(item.children, match);
+                    if (children.Count > 0)
+                        result.Add(new TreeViewItemData<L3TypeTreeEntry>(item.id, item.data, children));
                 }
             }
             return result;

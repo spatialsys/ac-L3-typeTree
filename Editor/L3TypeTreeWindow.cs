@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
@@ -10,6 +11,7 @@ namespace Less3.TypeTree.Editor
     public class L3TypeTreeWindow : EditorWindow
     {
         private const string ADD_NODE_UXML = "TypeTreeMenu";
+        private static readonly Dictionary<Type, Func<Type, bool>> _filters = new Dictionary<Type, Func<Type, bool>>();
         private static VisualTreeAsset _addNodeUXML;
         public VisualTreeAsset addNodeUXML
         {
@@ -24,7 +26,7 @@ namespace Less3.TypeTree.Editor
         private TreeView treeView;
         private TextField searchField;
         private string addNodeFilter = "";
-        private Type keyType;
+        private List<TreeViewItemData<L3TypeTreeEntry>> menu;
         private Action<Type> nodeSelectedCallback;
         private Action nothingSelectedCallback;
 
@@ -41,6 +43,13 @@ namespace Less3.TypeTree.Editor
             window.ShowPopup();
             window.Focus();
             window.Setup(KeyType, typeSelectedCallback, nothingSelectedCallback);
+        }
+
+        // Hides the types the filter rejects from pickers opened for exactly this key. Chained with
+        // && because a multicast Func would return only the last filter's answer.
+        public static void AddFilter(Type keyType, Func<Type, bool> filter)
+        {
+            _filters[keyType] = _filters.TryGetValue(keyType, out var previous) ? type => previous(type) && filter(type) : filter;
         }
 
         private void OnLostFocus()
@@ -61,7 +70,9 @@ namespace Less3.TypeTree.Editor
 
         public void Setup(Type keyType, Action<Type> nodeSelectedCallback, Action nothingSelectedCallback)
         {
-            this.keyType = keyType;
+            this.menu = L3TypeTreeCache.GetMenuForType(keyType);
+            if (_filters.TryGetValue(keyType, out var filter))
+                this.menu = L3TypeTreeCache.Filter(menu, entry => entry.type != null && filter(entry.type));
             this.nodeSelectedCallback = nodeSelectedCallback;
             this.nothingSelectedCallback = nothingSelectedCallback;
             this.selectedSomething = false;
@@ -97,13 +108,12 @@ namespace Less3.TypeTree.Editor
                 if (string.IsNullOrEmpty(filterText))
                 {
                     treeView.autoExpand = false;
-                    treeView.SetRootItems(L3TypeTreeCache.GetMenuForType(keyType));
+                    treeView.SetRootItems(menu);
                 }
                 else
                 {
-                    var filteredItems = L3TypeTreeCache.GetFilteredMenuForType(keyType, filterText);
                     treeView.autoExpand = true;
-                    treeView.SetRootItems(filteredItems);
+                    treeView.SetRootItems(L3TypeTreeCache.Filter(menu, entry => entry.path.ToLower().Contains(filterText)));
                     treeView.ExpandAll();
                 }
                 treeView.Rebuild();
@@ -143,7 +153,7 @@ namespace Less3.TypeTree.Editor
                 }
             };
 
-            treeView.SetRootItems(L3TypeTreeCache.GetMenuForType(keyType));
+            treeView.SetRootItems(menu);
             treeView.Rebuild();
         }
 
