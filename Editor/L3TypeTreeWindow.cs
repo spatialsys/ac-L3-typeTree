@@ -11,7 +11,6 @@ namespace Less3.TypeTree.Editor
     public class L3TypeTreeWindow : EditorWindow
     {
         private const string ADD_NODE_UXML = "TypeTreeMenu";
-        private static readonly Dictionary<Type, Func<Type, bool>> _filters = new Dictionary<Type, Func<Type, bool>>();
         private static VisualTreeAsset _addNodeUXML;
         public VisualTreeAsset addNodeUXML
         {
@@ -32,7 +31,9 @@ namespace Less3.TypeTree.Editor
 
         private bool selectedSomething = false;
 
-        public static void OpenForType(Type KeyType, Vector2 position, Action<Type> typeSelectedCallback, Action nothingSelectedCallback = null)
+        // filter hides the types it rejects from this one window, and a folder left empty by it goes
+        // too. The caller decides from where it opened the picker; the window holds no rules of its own.
+        public static void OpenForType(Type KeyType, Vector2 position, Action<Type> typeSelectedCallback, Action nothingSelectedCallback = null, Func<Type, bool> filter = null)
         {
             L3TypeTreeWindow window = ScriptableObject.CreateInstance<L3TypeTreeWindow>();
             //get mouse position in screen space
@@ -42,14 +43,7 @@ namespace Less3.TypeTree.Editor
             window.position = new Rect(newPos.x, newPos.y + 24, 256, 256);
             window.ShowPopup();
             window.Focus();
-            window.Setup(KeyType, typeSelectedCallback, nothingSelectedCallback);
-        }
-
-        // Hides the types the filter rejects from pickers opened for exactly this key. Chained with
-        // && because a multicast Func would return only the last filter's answer.
-        public static void AddFilter(Type keyType, Func<Type, bool> filter)
-        {
-            _filters[keyType] = _filters.TryGetValue(keyType, out var previous) ? type => previous(type) && filter(type) : filter;
+            window.Setup(KeyType, typeSelectedCallback, nothingSelectedCallback, filter);
         }
 
         private void OnLostFocus()
@@ -68,10 +62,10 @@ namespace Less3.TypeTree.Editor
             }
         }
 
-        public void Setup(Type keyType, Action<Type> nodeSelectedCallback, Action nothingSelectedCallback)
+        public void Setup(Type keyType, Action<Type> nodeSelectedCallback, Action nothingSelectedCallback, Func<Type, bool> filter = null)
         {
             this.menu = L3TypeTreeCache.GetMenuForType(keyType);
-            if (_filters.TryGetValue(keyType, out var filter))
+            if (filter != null)
                 this.menu = L3TypeTreeCache.Filter(menu, entry => entry.type != null && filter(entry.type));
             this.nodeSelectedCallback = nodeSelectedCallback;
             this.nothingSelectedCallback = nothingSelectedCallback;
